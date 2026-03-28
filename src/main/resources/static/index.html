@@ -258,6 +258,54 @@
     .welcome .welcome-icon { font-size: 40px; }
     .welcome p { font-size: 14px; text-align: center; line-height: 1.6; }
 
+    /* Library overview */
+    .overview { padding: 24px; overflow-y: auto; }
+    .overview-meta {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .overview-meta h3 { font-size: 14px; font-weight: 600; }
+    .overview-meta span { font-size: 12px; color: var(--text-muted); }
+    .doc-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .doc-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      cursor: default;
+      transition: box-shadow 0.15s;
+    }
+    .doc-card:hover { box-shadow: var(--shadow); }
+    .doc-card-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .file-type-badge {
+      background: #EEF1FF; color: var(--primary);
+      font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
+    .doc-card .doc-name {
+      font-size: 13px; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .doc-card .doc-desc {
+      font-size: 12px; color: var(--text-muted);
+      line-height: 1.55;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .doc-card-footer {
+      display: flex; gap: 12px;
+      font-size: 11px; color: var(--text-muted);
+    }
+
     /* Input area */
     .input-area {
       padding: 16px 24px 20px;
@@ -354,6 +402,8 @@
         <div class="welcome-icon">💬</div>
         <p>选择一个知识库，然后向 AI 提问<br/>AI 将基于文档内容为你作答</p>
       </div>
+      <!-- 选中知识库后显示文档概览，开始对话后隐藏 -->
+      <div class="overview" id="libraryOverview" style="display:none"></div>
     </div>
 
     <div class="input-area">
@@ -385,6 +435,7 @@
   const questionInput    = document.getElementById('questionInput');
   const sendBtn          = document.getElementById('sendBtn');
   const welcomeEl        = document.getElementById('welcome');
+  const libraryOverview  = document.getElementById('libraryOverview');
 
   // ── File selection ──
   function onFileSelected(file) {
@@ -495,7 +546,60 @@
       <span class="hint">基于知识库内容回答</span>`;
     sendBtn.disabled = false;
     questionInput.placeholder = '向「' + name + '」提问…';
-    welcomeEl && welcomeEl.remove();
+
+    // 隐藏欢迎页，展示文档概览
+    if (welcomeEl) welcomeEl.style.display = 'none';
+    libraryOverview.style.display = 'block';
+    loadLibraryOverview(name);
+  }
+
+  async function loadLibraryOverview(libraryName) {
+    libraryOverview.innerHTML = '<div style="padding:24px;color:var(--text-muted);font-size:13px">加载中…</div>';
+    try {
+      const res = await fetch('/api/knowledge/documents?libraryName=' + encodeURIComponent(libraryName));
+      const docs = await res.json();
+      renderOverview(libraryName, docs);
+    } catch (e) {
+      libraryOverview.innerHTML = '<div style="padding:24px;color:var(--danger);font-size:13px">加载失败</div>';
+    }
+  }
+
+  function renderOverview(libraryName, docs) {
+    if (!docs.length) {
+      libraryOverview.innerHTML = `<div style="padding:24px;color:var(--text-muted);font-size:13px">该知识库暂无文档</div>`;
+      return;
+    }
+    const cards = docs.map(doc => {
+      const date  = new Date(doc.uploadTime).toLocaleDateString('zh-CN');
+      const size  = formatSize(doc.fileSize);
+      const desc  = doc.description || '暂无描述';
+      return `
+        <div class="doc-card">
+          <div class="doc-card-header">
+            <span class="file-type-badge">${escapeHtml(doc.fileType || 'FILE')}</span>
+            <span class="doc-name" title="${escapeHtml(doc.filename)}">${escapeHtml(doc.filename)}</span>
+          </div>
+          <div class="doc-desc">${escapeHtml(desc)}</div>
+          <div class="doc-card-footer">
+            <span>📅 ${date}</span>
+            <span>💾 ${size}</span>
+            <span>🧩 ${doc.chunkCount ?? 0} 块</span>
+          </div>
+        </div>`;
+    }).join('');
+    libraryOverview.innerHTML = `
+      <div class="overview-meta">
+        <h3>「${escapeHtml(libraryName)}」共 ${docs.length} 个文档</h3>
+        <span>点击下方输入框开始提问</span>
+      </div>
+      <div class="doc-grid">${cards}</div>`;
+  }
+
+  function formatSize(bytes) {
+    if (!bytes) return '—';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
   // ── Chat ──
@@ -521,6 +625,11 @@
     sendBtn.disabled = true;
     questionInput.value = '';
     questionInput.style.height = 'auto';
+
+    // 第一次发送时，用聊天视图替换 overview
+    if (libraryOverview.style.display !== 'none') {
+      libraryOverview.style.display = 'none';
+    }
 
     appendMessage('user', question);
     const assistantBubble = appendMessage('assistant', '');

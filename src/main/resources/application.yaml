@@ -25,6 +25,14 @@ spring:
         distance-type: COSINE_DISTANCE
         dimensions: 1536   # text-embedding-3-small 维度
 
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
   servlet:
     multipart:
       max-file-size: 20MB

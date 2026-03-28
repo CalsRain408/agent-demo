@@ -1,15 +1,12 @@
 package com.agent.agentdemo.service;
 
+import com.agent.agentdemo.repository.DocumentRepository;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.tika.TikaDocumentReader;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
@@ -20,31 +17,14 @@ public class KnowledgeService {
 
     private final VectorStore vectorStore;
     private final ChatClient chatClient;
-    private final JdbcTemplate jdbcTemplate;
+    private final DocumentRepository documentRepository;
 
     public KnowledgeService(VectorStore vectorStore,
                             ChatClient.Builder chatClientBuilder,
-                            JdbcTemplate jdbcTemplate) {
-        this.vectorStore = vectorStore;
-        this.chatClient = chatClientBuilder.build();
-        this.jdbcTemplate = jdbcTemplate;
-    }
-
-    public void ingest(String libraryName, MultipartFile file) {
-        TikaDocumentReader reader = new TikaDocumentReader(file.getResource());
-        List<Document> docs = reader.get();
-
-        // 为每个 chunk 打上知识库名和来源文件名
-        String filename = file.getOriginalFilename();
-        docs.forEach(doc -> {
-            doc.getMetadata().put("library", libraryName);
-            doc.getMetadata().put("source", filename);
-        });
-
-        TokenTextSplitter splitter = new TokenTextSplitter();
-        List<Document> chunks = splitter.apply(docs);
-
-        vectorStore.add(chunks);
+                            DocumentRepository documentRepository) {
+        this.vectorStore        = vectorStore;
+        this.chatClient         = chatClientBuilder.build();
+        this.documentRepository = documentRepository;
     }
 
     public Flux<String> queryStream(String libraryName, String question) {
@@ -53,7 +33,7 @@ public class KnowledgeService {
                 SearchRequest.builder()
                         .query(question)
                         .topK(5)
-                        .filterExpression(b.eq("library", libraryName).build())
+                        .filterExpression(b.eq("library_name", libraryName).build())
                         .build()
         );
 
@@ -82,12 +62,6 @@ public class KnowledgeService {
     }
 
     public List<String> listLibraries() {
-        return jdbcTemplate.queryForList(
-                "SELECT DISTINCT metadata->>'library' AS library " +
-                "FROM vector_store " +
-                "WHERE metadata->>'library' IS NOT NULL " +
-                "ORDER BY library",
-                String.class
-        );
+        return documentRepository.findDistinctLibraryNames();
     }
 }
