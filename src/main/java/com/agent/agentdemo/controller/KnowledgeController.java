@@ -4,6 +4,7 @@ import com.agent.agentdemo.entity.DocumentEntity;
 import com.agent.agentdemo.model.QueryRequest;
 import com.agent.agentdemo.service.DocumentProcessingService;
 import com.agent.agentdemo.service.KnowledgeService;
+import com.agent.agentdemo.service.QueryPipelineService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,11 +21,14 @@ public class KnowledgeController {
 
     private final KnowledgeService knowledgeService;
     private final DocumentProcessingService documentProcessingService;
+    private final QueryPipelineService queryPipelineService;
 
     public KnowledgeController(KnowledgeService knowledgeService,
-                               DocumentProcessingService documentProcessingService) {
-        this.knowledgeService           = knowledgeService;
-        this.documentProcessingService  = documentProcessingService;
+                               DocumentProcessingService documentProcessingService,
+                               QueryPipelineService queryPipelineService) {
+        this.knowledgeService          = knowledgeService;
+        this.documentProcessingService = documentProcessingService;
+        this.queryPipelineService      = queryPipelineService;
     }
 
     /**
@@ -54,7 +58,7 @@ public class KnowledgeController {
     public ResponseBodyEmitter streamQuery(@RequestBody QueryRequest request) {
         ResponseBodyEmitter emitter = new ResponseBodyEmitter(120_000L);
 
-        knowledgeService.queryStream(request.libraryName(), request.question())
+        queryPipelineService.query(request.libraryName(), request.question())
                 .subscribe(
                         chunk -> {
                             try {

@@ -20,7 +20,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * 文档处理流水线：
+ * 用户上传文档的处理流程：
  *   解析 → 结构化标签 → 语义标签（LLM） → 入库 → 分块 → 元数据注入 → Embedding → PGVector
  */
 @Service
@@ -86,6 +86,11 @@ public class DocumentProcessingService {
     // 步骤实现
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * 解析原始文件
+     * @param file
+     * @return
+     */
     private List<Document> parseDocument(MultipartFile file) {
         return new TikaDocumentReader(file.getResource()).get();
     }
@@ -122,13 +127,20 @@ public class DocumentProcessingService {
 
     /**
      * 分块策略：
-     *  - 代码文件 → 小窗口（256 token），保留完整的类/方法上下文
-     *  - 普通文本 → 大窗口（512 token）
+     * TokenTextSplitter 构造器：
+     *   TokenTextSplitter(defaultChunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, keepSeparator)
+     *   注意：TokenTextSplitter 本身不支持 overlap，如需 overlap 需自行后处理。
+     *
+     * 尺寸选择理由：
+     *   - 代码文件用更大的 chunk（1024 token），因为一个方法/类的语义单元往往很长，
+     *     切太小容易从中间断开，导致检索到残缺的上下文。
+     *   - 文本文档（PDF/Word 等）用 512 token，通常能覆盖 1-3 个完整段落，
+     *     语义边界更自然，不需要过大的窗口。
      */
     private List<Document> chunk(List<Document> docs, String fileType) {
         TokenTextSplitter splitter = codeMetadataExtractor.isCodeFile(fileType)
-                ? new TokenTextSplitter(256, 64, 5, 10000, true)
-                : new TokenTextSplitter(512, 128, 5, 10000, true);
+                ? new TokenTextSplitter(1024, 100, 5, 10000, true)
+                : new TokenTextSplitter(512,  100, 5, 10000, true);
         return splitter.apply(docs);
     }
 
