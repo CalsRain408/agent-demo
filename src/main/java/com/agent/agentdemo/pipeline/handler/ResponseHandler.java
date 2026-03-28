@@ -1,35 +1,44 @@
 package com.agent.agentdemo.pipeline.handler;
 
+import com.agent.agentdemo.config.pipeline.HandlerConfig;
+import com.agent.agentdemo.config.pipeline.PipelineConfigProvider;
 import com.agent.agentdemo.pipeline.BaseQueryHandler;
 import com.agent.agentdemo.pipeline.QueryContext;
 import com.agent.agentdemo.pipeline.QueryIntent;
+import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * 责任链第三节点（终端节点）：生成回答。
- *
- * 将检索结果拼装为 RAG 上下文，结合 {@link QueryIntent#summary()} 构建精准的 system prompt，
- * 以用户原始问题作为 user message，调用 LLM 流式生成回答，写入 {@link QueryContext#setResponseStream}。
- */
+
 @Component
+@Slf4j
 public class ResponseHandler extends BaseQueryHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(ResponseHandler.class);
+    @Resource
+    private ChatClient chatClient;
 
-    private final ChatClient chatClient;
+    @Resource
+    private PipelineConfigProvider configProvider;
 
-    public ResponseHandler(ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder.build();
-    }
 
+    /**
+     * 责任链第三节点（终端节点）：生成回答。
+     * 将检索结果拼装为 RAG 上下文，并通过模板替换将动态内容注入 system prompt：
+     * {@code {intent_summary}} — QueryIntent.summary()
+     * {@code {intent_type}}    — 翻译后的意图类型
+     * {@code {rag_context}}    — 检索到的文档 chunk 拼接文本
+     * 模板内容、model、temperature 均通过 {@link PipelineConfigProvider} 注入，
+     * 修改 {@code agent.pipeline.response} 节点即可调整，无需改动代码。
+     */
     @Override
     public void handle(QueryContext context) {
         List<Document> docs = context.getRetrievedDocs();
@@ -42,14 +51,17 @@ public class ResponseHandler extends BaseQueryHandler {
             return;
         }
 
+        HandlerConfig cfg = configProvider.getResponseConfig();
+
         String ragContext = docs.stream()
                 .map(Document::getText)
                 .collect(Collectors.joining("\n\n---\n\n"));
 
-        String systemPrompt = buildSystemPrompt(context.getIntent(), ragContext);
+        String systemPrompt = renderPrompt(cfg.getSystemPrompt(), context.getIntent(), ragContext);
 
-        log.debug("ResponseHandler: generating response with {} docs", docs.size());
+        log.debug("ResponseHandler: model={} temp={} docs={}", cfg.getModel(), cfg.getTemperature(), docs.size());
         Flux<String> stream = chatClient.prompt()
+                .options(cfg.toChatOptions())
                 .system(systemPrompt)
                 .user(context.getOriginalQuestion())
                 .stream()
@@ -59,36 +71,30 @@ public class ResponseHandler extends BaseQueryHandler {
         // 终端节点，不调用 passToNext
     }
 
-    private String buildSystemPrompt(QueryIntent intent, String ragContext) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("你是一个专业的文档问答助手。请严格根据以下参考文档内容回答用户的问题。\n\n");
+    /**
+     * 将配置中的 system prompt 模板与运行时变量合并。
+     * 占位符约定（与 YAML 模板中的 {key} 对应）：
+     *   {intent_summary}、{intent_type}、{rag_context}
+     */
+    private String renderPrompt(String template, QueryIntent intent, String ragContext) {
+        String intentSummary = (intent != null && StringUtils.hasText(intent.summary()))
+                ? intent.summary() : "（未解析）";
+        String intentType    = (intent != null)
+                ? translateIntentType(intent.intentType()) : "（未解析）";
 
-        // 若意图解析成功，将意图摘要注入 prompt，引导模型聚焦
-        if (intent != null) {
-            sb.append("用户意图：").append(intent.summary()).append("\n");
-            sb.append("意图类型：").append(translateIntentType(intent.intentType())).append("\n\n");
-        }
-
-        sb.append("""
-                回答要求：
-                1. 严格基于文档内容作答，不编造文档中没有的信息
-                2. 如果文档中没有相关信息，请直接告知用户
-                3. 回答清晰、准确，对 procedural 类问题使用步骤列表，对 conceptual 类问题先给出定义再展开
-
-                参考文档：
-                """);
-        sb.append(ragContext);
-
-        return sb.toString();
+        return template
+                .replace("{intent_summary}", intentSummary)
+                .replace("{intent_type}",    intentType)
+                .replace("{rag_context}",    ragContext);
     }
 
     private String translateIntentType(String intentType) {
-        if (intentType == null) return "未知";
+        if (intentType == null) return "其他";
         return switch (intentType.toLowerCase()) {
-            case "factual"     -> "事实查询";
-            case "procedural"  -> "操作步骤";
-            case "conceptual"  -> "概念解释";
-            default            -> "其他";
+            case "factual"    -> "事实查询";
+            case "procedural" -> "操作步骤";
+            case "conceptual" -> "概念解释";
+            default           -> "其他";
         };
     }
 }

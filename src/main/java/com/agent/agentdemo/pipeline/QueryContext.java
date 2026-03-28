@@ -18,17 +18,17 @@ import java.util.List;
 @Builder
 public class QueryContext {
 
-    // ── 入参（不可变）────────────────────────────────
+    //入参（不可变）
     private final String libraryName;
     private final String originalQuestion;
 
-    // ── AnalysisHandler 写入 ──────────────────────
+    // AnalysisHandler 写入
     private QueryIntent intent;
 
-    // ── ToolCallHandler 写入 ─────────────────────
+    // ToolCallHandler 写入
     private List<Document> retrievedDocs;
 
-    // ── ResponseHandler 写入 ─────────────────────
+    // ResponseHandler 写入
     private Flux<String> responseStream;
 
     public QueryContext(String libraryName, String originalQuestion) {

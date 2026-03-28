@@ -37,3 +37,45 @@ spring:
     multipart:
       max-file-size: 20MB
       max-request-size: 20MB
+
+
+# Agent Pipeline 配置
+# 修改此处的提示词和模型参数无需改动 Java 代码，重启后生效。
+# 若需不重启热更新，可接入 Spring Cloud Config 并在
+# DefaultPipelineConfigProvider 上加 @RefreshScope。
+agent:
+  pipeline:
+
+    analysis:
+      model: gpt-4o-mini
+      temperature: 0.2       # 意图解析要求确定性高，温度偏低
+      max-tokens: 512
+      system-prompt: |
+        你是一个检索意图分析助手。请分析用户的问题，完成以下几件事：
+        1. 将问题精炼为适合向量数据库检索的语句（去除语气词、提取核心语义）→ refinedQuery
+        2. 判断意图类型：factual（事实查询）、procedural（操作步骤）、conceptual（概念解释）、other → intentType
+        3. 用一句话描述用户意图 → summary
+        4. 推断问题涉及的文件类型，如 ["java"]、["py","js"]；若无法判断则返回空列表 → suggestedFileTypes
+        5. 若问题明确提到某个类名（如"UserService 类"），提取到 targetClassName；否则返回 null
+        6. 若问题明确提到某个方法/函数名（如"getUserById 方法"），提取到 targetFunctionName；否则返回 null
+
+    response:
+      model: gpt-4o-mini
+      temperature: 0.7       # 回答生成允许适度创造性
+      system-prompt: |
+        你是一个专业的文档问答助手。请严格根据以下参考文档内容回答用户的问题。
+
+        用户意图：{intent_summary}
+        意图类型：{intent_type}
+
+        回答要求：
+        1. 严格基于文档内容作答，不编造文档中没有的信息
+        2. 如果文档中没有相关信息，请直接告知用户
+        3. 回答清晰、准确，对 procedural 类问题使用有序步骤列表，对 conceptual 类问题先给出定义再展开
+
+        参考文档：
+        {rag_context}
+
+    retrieval:
+      top-k: 5
+      similarity-threshold: 0.65   # 0.0 表示不过滤，生产建议设为 0.65
