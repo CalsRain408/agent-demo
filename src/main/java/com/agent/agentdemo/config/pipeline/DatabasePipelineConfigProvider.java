@@ -3,138 +3,144 @@ package com.agent.agentdemo.config.pipeline;
 import com.agent.agentdemo.entity.PipelineConfigEntity;
 import com.agent.agentdemo.repository.PipelineConfigRepository;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
-import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 
 /**
- * 基于 PostgreSQL 的 Pipeline 配置实现。
+ * 基于 PostgreSQL + Redis 的 Pipeline 配置实现。
  *
- * <p>生命周期：
- * <ol>
- *   <li>应用启动时，若 {@code pipeline_configs} 表为空，将 YAML 默认值种入 DB</li>
- *   <li>将 DB 中的配置加载到内存缓存（volatile 字段），Handler 直接读缓存，零 DB 查询</li>
- *   <li>通过 {@link #update} 系列方法更新时，同步写 DB 并刷新缓存，立即生效</li>
- *   <li>{@link #reload} 方法可从 DB 全量重载，用于外部直接修改 DB 后同步缓存</li>
- * </ol>
+ * <h3>缓存注解语义</h3>
+ * <ul>
+ *   <li>{@code @Cacheable}  — 读时优先命中 Redis；Miss 时查 DB 并回填缓存</li>
+ *   <li>{@code @CachePut}   — 写 DB 的同时更新 Redis，下次读直接命中新值</li>
+ *   <li>{@code @CacheEvict} — 驱逐缓存，下次读时重新从 DB 加载（用于手动同步）</li>
+ * </ul>
  *
- * <p>标记 {@code @Primary}，Spring 在注入 {@link PipelineConfigProvider} 时优先选择本类。
+ * <h3>多实例一致性</h3>
+ * 所有实例共享同一个 Redis，任意实例通过 {@code @CachePut} 更新后，
+ * 其他实例下次读取即可感知到新配置，无需广播。
  */
 @Slf4j
 @Primary
 @Component
+@RequiredArgsConstructor
 public class DatabasePipelineConfigProvider implements PipelineConfigProvider {
 
-    public static final String ANALYSIS  = "analysis";
-    public static final String RESPONSE  = "response";
-    public static final String RETRIEVAL = "retrieval";
+    static final String CACHE_NAME = "pipeline-configs";
+    static final String ANALYSIS   = "analysis";
+    static final String RESPONSE   = "response";
+    static final String RETRIEVAL  = "retrieval";
 
-    @Resource
-    private PipelineConfigRepository repository;
+    private final PipelineConfigRepository    repository;
+    private final DefaultPipelineConfigProvider yamlDefaults;
 
-    @Resource
-    private DefaultPipelineConfigProvider yamlDefaults;
-
-    // volatile 保证跨线程可见性；写操作发生在管理接口调用处（通常低频），无需锁
-    private volatile HandlerConfig   analysisConfig;
-    private volatile HandlerConfig   responseConfig;
-    private volatile RetrievalConfig retrievalConfig;
+    // ─────────────────────────────────────────────────────────────────────────
+    // 启动初始化：将 YAML 默认值种入 DB（仅当 DB 中不存在时执行一次）
+    // ─────────────────────────────────────────────────────────────────────────
 
     @PostConstruct
     void init() {
-        seedDefaults();
-        reload();
+        seedIfAbsent(ANALYSIS,  toEntity(ANALYSIS,  yamlDefaults.getAnalysisConfig()));
+        seedIfAbsent(RESPONSE,  toEntity(RESPONSE,  yamlDefaults.getResponseConfig()));
+        seedIfAbsent(RETRIEVAL, toEntity(RETRIEVAL, yamlDefaults.getRetrievalConfig()));
+    }
+
+    private void seedIfAbsent(String name, PipelineConfigEntity entity) {
+        if (!repository.existsById(name)) {
+            repository.save(entity);
+            log.info("Pipeline config seeded from YAML defaults: handler={}", name);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // PipelineConfigProvider 接口实现（读缓存，零 DB 查询）
+    // 读：@Cacheable — Redis 命中则直接返回，Miss 则查 DB 并回填
     // ─────────────────────────────────────────────────────────────────────────
 
-    @Override public HandlerConfig   getAnalysisConfig()  { return analysisConfig; }
-    @Override public HandlerConfig   getResponseConfig()  { return responseConfig; }
-    @Override public RetrievalConfig getRetrievalConfig() { return retrievalConfig; }
+    @Override
+    @Cacheable(cacheNames = CACHE_NAME, key = "'" + ANALYSIS + "'")
+    public HandlerConfig getAnalysisConfig() {
+        log.debug("Cache miss: loading analysis config from DB");
+        return toHandlerConfig(repository.findById(ANALYSIS)
+                .orElseGet(() -> toEntity(ANALYSIS, yamlDefaults.getAnalysisConfig())));
+    }
+
+    @Override
+    @Cacheable(cacheNames = CACHE_NAME, key = "'" + RESPONSE + "'")
+    public HandlerConfig getResponseConfig() {
+        log.debug("Cache miss: loading response config from DB");
+        return toHandlerConfig(repository.findById(RESPONSE)
+                .orElseGet(() -> toEntity(RESPONSE, yamlDefaults.getResponseConfig())));
+    }
+
+    @Override
+    @Cacheable(cacheNames = CACHE_NAME, key = "'" + RETRIEVAL + "'")
+    public RetrievalConfig getRetrievalConfig() {
+        log.debug("Cache miss: loading retrieval config from DB");
+        return toRetrievalConfig(repository.findById(RETRIEVAL)
+                .orElseGet(() -> toEntity(RETRIEVAL, yamlDefaults.getRetrievalConfig())));
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 更新接口（写 DB + 刷新缓存，立即生效）
+    // 写：持久化到 DB，同步删除 Redis
     // ─────────────────────────────────────────────────────────────────────────
 
+    @CacheEvict(cacheNames = CACHE_NAME, key = "'" + ANALYSIS + "'")
     public HandlerConfig updateAnalysis(HandlerConfig config) {
         repository.save(toEntity(ANALYSIS, config));
-        analysisConfig = config;
         log.info("Pipeline config updated: handler=analysis model={}", config.getModel());
-        return analysisConfig;
+        return config;
     }
 
+    @CacheEvict(cacheNames = CACHE_NAME, key = "'" + RESPONSE + "'")
     public HandlerConfig updateResponse(HandlerConfig config) {
         repository.save(toEntity(RESPONSE, config));
-        responseConfig = config;
         log.info("Pipeline config updated: handler=response model={}", config.getModel());
-        return responseConfig;
+        return config;
     }
 
+    @CacheEvict(cacheNames = CACHE_NAME, key = "'" + RETRIEVAL + "'")
     public RetrievalConfig updateRetrieval(RetrievalConfig config) {
         repository.save(toEntity(RETRIEVAL, config));
-        retrievalConfig = config;
         log.info("Pipeline config updated: handler=retrieval topK={} threshold={}",
                 config.getTopK(), config.getSimilarityThreshold());
-        return retrievalConfig;
+        return config;
     }
 
-    /**
-     * 从 DB 全量重载配置到内存缓存。
-     * 用于外部直接修改 DB 后（如 DBA 手工改表）通知应用同步。
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    // 强制重载：@CacheEvict — 驱逐所有缓存项，下次读时从 DB 重新加载
+    // 用于 DBA 直接改库后通知应用同步
+    // ─────────────────────────────────────────────────────────────────────────
+
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public void reload() {
-        analysisConfig  = loadHandlerConfig(ANALYSIS,  yamlDefaults.getAnalysisConfig());
-        responseConfig  = loadHandlerConfig(RESPONSE,  yamlDefaults.getResponseConfig());
-        retrievalConfig = loadRetrievalConfig(RETRIEVAL, yamlDefaults.getRetrievalConfig());
-        log.info("Pipeline configs reloaded from DB");
+        log.info("Pipeline configs cache evicted. Will reload from DB on next access.");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Entity <-> Config 转换（私有，不走代理，不能加缓存注解）
+    // ─────────────────────────────────────────────────────────────────────────
 
-    /** 若 DB 中不存在对应行，将 YAML 默认值写入，保证首次启动无需手动初始化 */
-    private void seedDefaults() {
-        if (!repository.existsById(ANALYSIS)) {
-            repository.save(toEntity(ANALYSIS, yamlDefaults.getAnalysisConfig()));
-            log.info("Pipeline config seeded from YAML defaults: handler=analysis");
-        }
-        if (!repository.existsById(RESPONSE)) {
-            repository.save(toEntity(RESPONSE, yamlDefaults.getResponseConfig()));
-            log.info("Pipeline config seeded from YAML defaults: handler=response");
-        }
-        if (!repository.existsById(RETRIEVAL)) {
-            repository.save(toEntity(RETRIEVAL, yamlDefaults.getRetrievalConfig()));
-            log.info("Pipeline config seeded from YAML defaults: handler=retrieval");
-        }
+    private HandlerConfig toHandlerConfig(PipelineConfigEntity e) {
+        HandlerConfig cfg = new HandlerConfig();
+        cfg.setModel(e.getModel());
+        cfg.setTemperature(e.getTemperature());
+        cfg.setMaxTokens(e.getMaxTokens());
+        cfg.setSystemPrompt(e.getSystemPrompt());
+        return cfg;
     }
 
-    private HandlerConfig loadHandlerConfig(String name, HandlerConfig fallback) {
-        return repository.findById(name)
-                .map(e -> {
-                    HandlerConfig cfg = new HandlerConfig();
-                    cfg.setModel(e.getModel());
-                    cfg.setTemperature(e.getTemperature());
-                    cfg.setMaxTokens(e.getMaxTokens());
-                    cfg.setSystemPrompt(e.getSystemPrompt());
-                    return cfg;
-                })
-                .orElse(fallback);
-    }
-
-    private RetrievalConfig loadRetrievalConfig(String name, RetrievalConfig fallback) {
-        return repository.findById(name)
-                .map(e -> {
-                    RetrievalConfig cfg = new RetrievalConfig();
-                    if (e.getTopK()               != null) cfg.setTopK(e.getTopK());
-                    if (e.getSimilarityThreshold() != null) cfg.setSimilarityThreshold(e.getSimilarityThreshold());
-                    return cfg;
-                })
-                .orElse(fallback);
+    private RetrievalConfig toRetrievalConfig(PipelineConfigEntity e) {
+        RetrievalConfig cfg = new RetrievalConfig();
+        if (e.getTopK()                != null) cfg.setTopK(e.getTopK());
+        if (e.getSimilarityThreshold() != null) cfg.setSimilarityThreshold(e.getSimilarityThreshold());
+        return cfg;
     }
 
     private PipelineConfigEntity toEntity(String name, HandlerConfig cfg) {
