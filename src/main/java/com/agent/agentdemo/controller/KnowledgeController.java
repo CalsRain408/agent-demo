@@ -89,4 +89,37 @@ public class KnowledgeController {
     public ResponseEntity<List<DocumentEntity>> documents(@RequestParam String libraryName) {
         return ResponseEntity.ok(documentProcessingService.listByLibrary(libraryName));
     }
+
+    /**
+     * 按 ID 更新文档：内容未变则跳过，否则重新分块 + Embedding
+     */
+    @PutMapping("/documents/{documentId}")
+    public ResponseEntity<?> updateDocument(
+            @PathVariable String documentId,
+            @RequestParam("file") MultipartFile file) {
+        try {
+            DocumentEntity doc = documentProcessingService.updateDocument(documentId, file);
+            return ResponseEntity.ok(Map.of(
+                    "message",     "文档「" + doc.getFilename() + "」更新成功",
+                    "documentId",  doc.getId(),
+                    "chunkCount",  doc.getChunkCount(),
+                    "description", doc.getDescription()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "更新失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 按 ID 删除文档及其所有 chunks
+     */
+    @DeleteMapping("/documents/{documentId}")
+    public ResponseEntity<?> deleteDocument(@PathVariable String documentId) {
+        try {
+            documentProcessingService.deleteDocument(documentId);
+            return ResponseEntity.ok(Map.of("message", "文档已删除"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "删除失败：" + e.getMessage()));
+        }
+    }
 }

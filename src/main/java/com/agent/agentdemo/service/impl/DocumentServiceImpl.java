@@ -18,6 +18,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.FilterExpressionBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -74,27 +75,19 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, DocumentEnt
         LibraryEntity library = libraryService.getOrCreate(libraryName);
         String libraryId = library.getId();
 
-        // 增量更新检查：同一知识库 + 文件名已存在记录
-        DocumentEntity existingEntity = this.lambdaQuery()
+        // 同名文件已存在时拒绝重复上传，引导用户使用更新接口
+        boolean exists = this.lambdaQuery()
                 .eq(DocumentEntity::getLibraryId, libraryId)
                 .eq(DocumentEntity::getFilename, file.getOriginalFilename())
-                .one();
-        if (existingEntity != null) {
-            if (contentHash.equals(existingEntity.getContentHash())) {
-                log.info("File '{}' content unchanged (hash={}), skipping re-processing",
-                        file.getOriginalFilename(), contentHash);
-                return existingEntity;
-            }
-            // 内容变化：清理旧 chunks 和旧记录
-            log.info("File '{}' content changed, removing old data for document id={}",
-                    file.getOriginalFilename(), existingEntity.getId());
-            deleteChunksByDocumentId(existingEntity.getId());
-            this.removeById(existingEntity.getId());
+                .exists();
+        if (exists) {
+            throw new IllegalStateException(
+                    "文件「" + file.getOriginalFilename() + "」已存在于知识库中，请使用更新功能。");
         }
 
         // 1. 解析原始文档
-        List<org.springframework.ai.document.Document> rawDocs = parseDocument(file);
-        String fullText = rawDocs.stream().map(org.springframework.ai.document.Document::getText).collect(Collectors.joining("\n"));
+        List<Document> rawDocs = parseDocument(file);
+        String fullText = rawDocs.stream().map(Document::getText).collect(Collectors.joining("\n"));
 
         // 2. 结构化标签
         String fileType = detectFileType(file.getOriginalFilename());
@@ -231,6 +224,72 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, DocumentEnt
                 .eq(DocumentEntity::getLibraryId, library.getId())
                 .orderByDesc(DocumentEntity::getUploadTime)
                 .list();
+    }
+
+    /**
+     * 使用事务防止数据不一致性
+     * @param documentId
+     * @param file
+     * @return
+     */
+    @Transactional
+    @Override
+    public DocumentEntity updateDocument(String documentId, MultipartFile file) {
+        DocumentEntity existing = this.getById(documentId);
+        if (existing == null) {
+            throw new IllegalArgumentException("文档不存在: " + documentId);
+        }
+
+        // 计算新文件 MD5，内容未变则跳过
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read file bytes", e);
+        }
+        String contentHash = computeMd5(fileBytes);
+
+        if (contentHash.equals(existing.getContentHash())) {
+            log.info("Document id={} content unchanged, skipping update", documentId);
+            return existing;
+        }
+
+        // 删除旧 chunks，保留文档 ID（chunks 通过 document_id 关联，ID 不变即可复用）
+        deleteChunksByDocumentId(documentId);
+
+        // 重新处理：解析 → 摘要 → 分块 → Embedding
+        List<Document> rawDocs = parseDocument(file);
+        String fullText = rawDocs.stream().map(Document::getText).collect(Collectors.joining("\n"));
+        String fileType = detectFileType(file.getOriginalFilename());
+
+        List<Document> chunks = chunk(rawDocs, fileType);
+        enrichChunks(chunks, existing);  // existing 的 id/libraryId 不变，直接复用
+
+        // 插入新的chunk
+        log.info("Re-embedding {} chunks for document id={}", chunks.size(), documentId);
+        vectorStore.add(chunks);
+
+        // 最后更新文档记录
+        existing.setFileSize(file.getSize());
+        existing.setFileType(fileType);
+        existing.setUploadTime(LocalDateTime.now());
+        existing.setDescription(generateDescription(fullText, fileType));
+        existing.setChunkCount(chunks.size());
+        existing.setContentHash(contentHash);
+        this.updateById(existing);
+
+        return existing;
+    }
+
+    @Transactional
+    @Override
+    public void deleteDocument(String documentId) {
+        if (!this.lambdaQuery().eq(DocumentEntity::getId, documentId).exists()) {
+            throw new IllegalArgumentException("文档不存在: " + documentId);
+        }
+        deleteChunksByDocumentId(documentId);
+        this.removeById(documentId);
+        log.info("Deleted document id={} and its chunks", documentId);
     }
 
     private String detectFileType(String filename) {
