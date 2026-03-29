@@ -7,10 +7,7 @@ import com.agent.agentdemo.pipeline.QueryContext;
 import com.agent.agentdemo.pipeline.QueryIntent;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 

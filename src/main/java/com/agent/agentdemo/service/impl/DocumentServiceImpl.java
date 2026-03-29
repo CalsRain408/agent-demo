@@ -262,18 +262,19 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, DocumentEnt
         String fullText = rawDocs.stream().map(Document::getText).collect(Collectors.joining("\n"));
         String fileType = detectFileType(file.getOriginalFilename());
 
+        // 先生成摘要（LLM 调用），失败时尚未写入 Embedding，不浪费 token
+        String description = generateDescription(fullText, fileType);
+
         List<Document> chunks = chunk(rawDocs, fileType);
         enrichChunks(chunks, existing);  // existing 的 id/libraryId 不变，直接复用
 
-        // 插入新的chunk
         log.info("Re-embedding {} chunks for document id={}", chunks.size(), documentId);
         vectorStore.add(chunks);
 
-        // 最后更新文档记录
         existing.setFileSize(file.getSize());
         existing.setFileType(fileType);
         existing.setUploadTime(LocalDateTime.now());
-        existing.setDescription(generateDescription(fullText, fileType));
+        existing.setDescription(description);
         existing.setChunkCount(chunks.size());
         existing.setContentHash(contentHash);
         this.updateById(existing);

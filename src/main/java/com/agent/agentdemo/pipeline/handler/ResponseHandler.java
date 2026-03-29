@@ -9,8 +9,6 @@ import com.agent.agentdemo.pipeline.QueryContext;
 import com.agent.agentdemo.pipeline.QueryIntent;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,10 +50,11 @@ public class ResponseHandler extends BaseQueryHandler {
         if (docs == null || docs.isEmpty()) {
             log.debug("ResponseHandler: no docs retrieved, returning empty hint");
 
-            LibraryEntity library = libraryMapper.getById(context.getLibraryId());
+            LibraryEntity library = libraryMapper.selectById(context.getLibraryId());
+            String libraryName = (library != null) ? library.getName() : context.getLibraryId();
 
             context.setResponseStream(
-                    Flux.just("在知识库「" + library.getName() + "」中未找到与该问题相关的内容。")
+                    Flux.just("在知识库「" + libraryName + "」中未找到与该问题相关的内容。")
             );
             return;
         }

@@ -1,6 +1,5 @@
 package com.agent.agentdemo.pipeline;
 
-import lombok.Builder;
 import lombok.Data;
 import org.springframework.ai.document.Document;
 import reactor.core.publisher.Flux;
@@ -12,7 +11,6 @@ import java.util.List;
  * 各 Handler 从中读取输入、将结果写回，由下一个节点继续处理。
  */
 @Data
-@Builder
 public class QueryContext {
 
     //入参（不可变）
