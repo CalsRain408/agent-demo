@@ -5,7 +5,7 @@ import com.agent.agentdemo.config.pipeline.RetrievalConfig;
 import com.agent.agentdemo.pipeline.BaseQueryHandler;
 import com.agent.agentdemo.pipeline.QueryContext;
 import com.agent.agentdemo.pipeline.QueryIntent;
-import com.agent.agentdemo.repository.DocumentRepository;
+import com.agent.agentdemo.mapper.DocumentMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -49,7 +49,7 @@ public class ToolCallHandler extends BaseQueryHandler {
     private VectorStore vectorStore;
 
     @Resource
-    private DocumentRepository documentRepository;
+    private DocumentMapper documentMapper;
 
     @Resource
     private PipelineConfigProvider configProvider;
@@ -61,9 +61,9 @@ public class ToolCallHandler extends BaseQueryHandler {
         QueryIntent     intent = context.getIntent();
 
         // ── Stage 1: 粗筛 ─────────────────────────────────────────────────
-        List<String> docIds = coarseFilter(context.getLibraryName(), intent);
-        log.debug("ToolCallHandler Stage1: library='{}' fileTypes={} → {} docs",
-                context.getLibraryName(),
+        List<String> docIds = coarseFilter(context.getLibraryId(), intent);
+        log.debug("ToolCallHandler Stage1: libraryId='{}' fileTypes={} → {} docs",
+                context.getLibraryId(),
                 intent != null ? intent.suggestedFileTypes() : "[]",
                 docIds.size());
 
@@ -104,15 +104,15 @@ public class ToolCallHandler extends BaseQueryHandler {
 
     // ── Stage 1：documents 表粗筛 ─────────────────────────────────────────
 
-    private List<String> coarseFilter(String libraryName, QueryIntent intent) {
+    private List<String> coarseFilter(String libraryId, QueryIntent intent) {
         List<String> fileTypes = (intent != null && intent.suggestedFileTypes() != null)
                 ? intent.suggestedFileTypes()
                 : List.of();
 
         if (fileTypes.isEmpty()) {
-            return documentRepository.findIdsByLibraryName(libraryName);
+            return documentMapper.selectIdsByLibraryId(libraryId);
         }
-        return documentRepository.findIdsByLibraryNameAndFileTypes(libraryName, fileTypes);
+        return documentMapper.selectIdsByLibraryIdAndFileTypes(libraryId, fileTypes);
     }
 
     // ── Stage 2：构建 chunk 级 FilterExpression ───────────────────────────

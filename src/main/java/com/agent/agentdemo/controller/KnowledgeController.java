@@ -2,9 +2,9 @@ package com.agent.agentdemo.controller;
 
 import com.agent.agentdemo.entity.DocumentEntity;
 import com.agent.agentdemo.model.QueryRequest;
-import com.agent.agentdemo.service.DocumentProcessingService;
-import com.agent.agentdemo.service.KnowledgeService;
-import com.agent.agentdemo.service.QueryPipelineService;
+import com.agent.agentdemo.service.impl.DocumentServiceImpl;
+import com.agent.agentdemo.service.impl.LibraryServiceImpl;
+import com.agent.agentdemo.service.impl.QueryPipelineServiceImpl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,13 +19,13 @@ import java.util.Map;
 @RequestMapping("/api/knowledge")
 public class KnowledgeController {
 
-    private final KnowledgeService knowledgeService;
-    private final DocumentProcessingService documentProcessingService;
-    private final QueryPipelineService queryPipelineService;
+    private final LibraryServiceImpl knowledgeService;
+    private final DocumentServiceImpl documentProcessingService;
+    private final QueryPipelineServiceImpl queryPipelineService;
 
-    public KnowledgeController(KnowledgeService knowledgeService,
-                               DocumentProcessingService documentProcessingService,
-                               QueryPipelineService queryPipelineService) {
+    public KnowledgeController(LibraryServiceImpl knowledgeService,
+                               DocumentServiceImpl documentProcessingService,
+                               QueryPipelineServiceImpl queryPipelineService) {
         this.knowledgeService          = knowledgeService;
         this.documentProcessingService = documentProcessingService;
         this.queryPipelineService      = queryPipelineService;

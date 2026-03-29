@@ -1,12 +1,9 @@
 package com.agent.agentdemo.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
@@ -20,37 +17,29 @@ import java.time.LocalDateTime;
  *
  * 两类 Handler 共用一张表，无关字段留 null。
  */
-@Entity
-@Table(name = "pipeline_configs")
-@Getter
-@Setter
+@TableName("pipeline_configs")
+@Data
+@AllArgsConstructor
 @NoArgsConstructor
 public class PipelineConfigEntity {
 
-    @Id
-    @Column(name = "handler_name", length = 50)
+    @TableId(value = "handler_name", type = IdType.INPUT)
     private String handlerName;
 
     // ── HandlerConfig ─────────────────────────────
-    @Column(length = 100)
     private String model;
 
     private Double temperature;
 
-    @Column(name = "max_tokens")
     private Integer maxTokens;
 
-    @Column(name = "system_prompt", columnDefinition = "TEXT")
     private String systemPrompt;
 
     // ── RetrievalConfig ───────────────────────────
-    @Column(name = "top_k")
     private Integer topK;
 
-    @Column(name = "similarity_threshold")
     private Double similarityThreshold;
 
     // ── 审计 ──────────────────────────────────────
-    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 }

@@ -1,10 +1,7 @@
 package com.agent.agentdemo.pipeline;
 
-import jakarta.persistence.Entity;
-import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.ai.document.Document;
 import reactor.core.publisher.Flux;
 
@@ -19,7 +16,7 @@ import java.util.List;
 public class QueryContext {
 
     //入参（不可变）
-    private final String libraryName;
+    private final String libraryId;
     private final String originalQuestion;
 
     // AnalysisHandler 写入
@@ -31,8 +28,8 @@ public class QueryContext {
     // ResponseHandler 写入
     private Flux<String> responseStream;
 
-    public QueryContext(String libraryName, String originalQuestion) {
-        this.libraryName      = libraryName;
+    public QueryContext(String libraryId, String originalQuestion) {
+        this.libraryId      = libraryId;
         this.originalQuestion = originalQuestion;
     }
 }

@@ -25,19 +25,15 @@ spring:
         distance-type: COSINE_DISTANCE
         dimensions: 1536   # text-embedding-3-small 维度
 
-  jpa:
-    hibernate:
-      ddl-auto: update
-    show-sql: false
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+  sql:
+    init:
+      mode: always   # 每次启动执行 schema.sql（建表语句用 IF NOT EXISTS 保证幂等）
 
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      # password: ${REDIS_PASSWORD:}
+      password: ${REDIS_PASSWORD:}
 
   cache:
     type: redis
@@ -48,10 +44,7 @@ spring:
       max-request-size: 20MB
 
 
-# Agent Pipeline 配置
-# 修改此处的提示词和模型参数无需改动 Java 代码，重启后生效。
-# 若需不重启热更新，可接入 Spring Cloud Config 并在
-# DefaultPipelineConfigProvider 上加 @RefreshScope。
+# Agent Pipeline 原始默认配置，DB持久化
 agent:
   pipeline:
 
@@ -88,3 +81,12 @@ agent:
     retrieval:
       top-k: 5
       similarity-threshold: 0.65   # 0.0 表示不过滤，生产建议设为 0.65
+
+
+# MyBatis-Plus
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true   # library_name ↔ libraryName 自动映射
+  global-config:
+    db-config:
+      id-type: input                     # 主键由应用自行赋值（UUID / 自然键）

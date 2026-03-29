@@ -2,6 +2,8 @@ package com.agent.agentdemo.pipeline.handler;
 
 import com.agent.agentdemo.config.pipeline.HandlerConfig;
 import com.agent.agentdemo.config.pipeline.PipelineConfigProvider;
+import com.agent.agentdemo.entity.LibraryEntity;
+import com.agent.agentdemo.mapper.LibraryMapper;
 import com.agent.agentdemo.pipeline.BaseQueryHandler;
 import com.agent.agentdemo.pipeline.QueryContext;
 import com.agent.agentdemo.pipeline.QueryIntent;
@@ -11,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
@@ -29,6 +32,9 @@ public class ResponseHandler extends BaseQueryHandler {
     @Resource
     private PipelineConfigProvider configProvider;
 
+    @Autowired
+    private LibraryMapper libraryMapper;
+
 
     /**
      * 责任链第三节点（终端节点）：生成回答。
@@ -45,8 +51,11 @@ public class ResponseHandler extends BaseQueryHandler {
 
         if (docs == null || docs.isEmpty()) {
             log.debug("ResponseHandler: no docs retrieved, returning empty hint");
+
+            LibraryEntity library = libraryMapper.getById(context.getLibraryId());
+
             context.setResponseStream(
-                    Flux.just("在知识库「" + context.getLibraryName() + "」中未找到与该问题相关的内容。")
+                    Flux.just("在知识库「" + library.getName() + "」中未找到与该问题相关的内容。")
             );
             return;
         }

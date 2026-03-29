@@ -1,12 +1,11 @@
 package com.agent.agentdemo.config.pipeline;
 
 import com.agent.agentdemo.entity.PipelineConfigEntity;
-import com.agent.agentdemo.repository.PipelineConfigRepository;
+import com.agent.agentdemo.mapper.PipelineConfigMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -38,7 +37,7 @@ public class DatabasePipelineConfigProvider implements PipelineConfigProvider {
     static final String RESPONSE   = "response";
     static final String RETRIEVAL  = "retrieval";
 
-    private final PipelineConfigRepository    repository;
+    private final PipelineConfigMapper         pipelineConfigMapper;
     private final DefaultPipelineConfigProvider yamlDefaults;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -53,8 +52,8 @@ public class DatabasePipelineConfigProvider implements PipelineConfigProvider {
     }
 
     private void seedIfAbsent(String name, PipelineConfigEntity entity) {
-        if (!repository.existsById(name)) {
-            repository.save(entity);
+        if (pipelineConfigMapper.selectById(name) == null) {
+            pipelineConfigMapper.insert(entity);
             log.info("Pipeline config seeded from YAML defaults: handler={}", name);
         }
     }
@@ -67,24 +66,24 @@ public class DatabasePipelineConfigProvider implements PipelineConfigProvider {
     @Cacheable(cacheNames = CACHE_NAME, key = "'" + ANALYSIS + "'")
     public HandlerConfig getAnalysisConfig() {
         log.debug("Cache miss: loading analysis config from DB");
-        return toHandlerConfig(repository.findById(ANALYSIS)
-                .orElseGet(() -> toEntity(ANALYSIS, yamlDefaults.getAnalysisConfig())));
+        PipelineConfigEntity e = pipelineConfigMapper.selectById(ANALYSIS);
+        return toHandlerConfig(e != null ? e : toEntity(ANALYSIS, yamlDefaults.getAnalysisConfig()));
     }
 
     @Override
     @Cacheable(cacheNames = CACHE_NAME, key = "'" + RESPONSE + "'")
     public HandlerConfig getResponseConfig() {
         log.debug("Cache miss: loading response config from DB");
-        return toHandlerConfig(repository.findById(RESPONSE)
-                .orElseGet(() -> toEntity(RESPONSE, yamlDefaults.getResponseConfig())));
+        PipelineConfigEntity e = pipelineConfigMapper.selectById(RESPONSE);
+        return toHandlerConfig(e != null ? e : toEntity(RESPONSE, yamlDefaults.getResponseConfig()));
     }
 
     @Override
     @Cacheable(cacheNames = CACHE_NAME, key = "'" + RETRIEVAL + "'")
     public RetrievalConfig getRetrievalConfig() {
         log.debug("Cache miss: loading retrieval config from DB");
-        return toRetrievalConfig(repository.findById(RETRIEVAL)
-                .orElseGet(() -> toEntity(RETRIEVAL, yamlDefaults.getRetrievalConfig())));
+        PipelineConfigEntity e = pipelineConfigMapper.selectById(RETRIEVAL);
+        return toRetrievalConfig(e != null ? e : toEntity(RETRIEVAL, yamlDefaults.getRetrievalConfig()));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -93,21 +92,21 @@ public class DatabasePipelineConfigProvider implements PipelineConfigProvider {
 
     @CacheEvict(cacheNames = CACHE_NAME, key = "'" + ANALYSIS + "'")
     public HandlerConfig updateAnalysis(HandlerConfig config) {
-        repository.save(toEntity(ANALYSIS, config));
+        pipelineConfigMapper.updateById(toEntity(ANALYSIS, config));
         log.info("Pipeline config updated: handler=analysis model={}", config.getModel());
         return config;
     }
 
     @CacheEvict(cacheNames = CACHE_NAME, key = "'" + RESPONSE + "'")
     public HandlerConfig updateResponse(HandlerConfig config) {
-        repository.save(toEntity(RESPONSE, config));
+        pipelineConfigMapper.updateById(toEntity(RESPONSE, config));
         log.info("Pipeline config updated: handler=response model={}", config.getModel());
         return config;
     }
 
     @CacheEvict(cacheNames = CACHE_NAME, key = "'" + RETRIEVAL + "'")
     public RetrievalConfig updateRetrieval(RetrievalConfig config) {
-        repository.save(toEntity(RETRIEVAL, config));
+        pipelineConfigMapper.updateById(toEntity(RETRIEVAL, config));
         log.info("Pipeline config updated: handler=retrieval topK={} threshold={}",
                 config.getTopK(), config.getSimilarityThreshold());
         return config;
